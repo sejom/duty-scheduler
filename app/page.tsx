@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
 type Shift = "morning" | "afternoon" | "night";
 
@@ -28,6 +30,9 @@ function todayLocalDate() {
 
 export default function Home() {
   const [selectedDate, setSelectedDate] = useState(todayLocalDate());
+  const [session, setSession] = useState<Session | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [assignments, setAssignments] = useState<Record<Shift, string>>({
     morning: "",
     afternoon: "",
@@ -41,6 +46,23 @@ export default function Home() {
     () => Object.keys(SHIFT_LABELS) as Shift[],
     [],
   );
+
+  useEffect(() => {
+    const run = async () => {
+      const { data } = await supabase.auth.getSession();
+      setSession(data.session);
+    };
+
+    void run();
+
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+
+    return () => {
+      data.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const run = async () => {
@@ -79,15 +101,52 @@ export default function Home() {
     void run();
   }, [selectedDate]);
 
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setStatusMessage("Signing in...");
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    if (error) {
+      setStatusMessage(error.message);
+      return;
+    }
+
+    setPassword("");
+    setStatusMessage("Signed in.");
+  };
+
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      setStatusMessage(error.message);
+      return;
+    }
+    setStatusMessage("Signed out.");
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+
+    if (!session) {
+      setStatusMessage("Please sign in before saving.");
+      return;
+    }
+
     setIsSaving(true);
     setStatusMessage("Saving...");
 
     try {
+      const token = session.access_token;
       const response = await fetch("/api/schedules", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           date: selectedDate,
           assignments: orderedShifts.map((shift) => ({
@@ -120,6 +179,52 @@ export default function Home() {
           Simple manual scheduling with three shifts per day.
         </p>
       </section>
+
+      {!session ? (
+        <form
+          onSubmit={handleLogin}
+          className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm"
+        >
+          <h2 className="text-lg font-semibold">Sign in to edit schedule</h2>
+          <label className="flex flex-col gap-2 text-sm font-medium">
+            Email
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2"
+              required
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm font-medium">
+            Password
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2"
+              required
+            />
+          </label>
+          <button
+            type="submit"
+            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white"
+          >
+            Sign in
+          </button>
+        </form>
+      ) : (
+        <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+          <p className="text-sm text-gray-700">Signed in as {session.user.email}</p>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium"
+          >
+            Sign out
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <label className="flex flex-col gap-2 text-sm font-medium">
@@ -164,7 +269,7 @@ export default function Home() {
           <p className="text-sm text-gray-600">{statusMessage}</p>
           <button
             type="submit"
-            disabled={isSaving}
+            disabled={isSaving || !session}
             className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
             {isSaving ? "Saving..." : "Save schedule"}

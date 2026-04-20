@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 
 type Shift = "morning" | "afternoon" | "night";
 
@@ -10,7 +10,25 @@ type IncomingAssignment = {
 
 const VALID_SHIFTS: Shift[] = ["morning", "afternoon", "night"];
 
+function buildSupabaseForRequest(request: NextRequest) {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Missing Supabase environment variables");
+  }
+
+  const authHeader = request.headers.get("authorization");
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: authHeader ? { Authorization: authHeader } : {},
+    },
+  });
+}
+
 export async function GET(request: NextRequest) {
+  const supabase = buildSupabaseForRequest(request);
   const date = request.nextUrl.searchParams.get("date");
 
   if (!date) {
@@ -31,6 +49,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const supabase = buildSupabaseForRequest(request);
   const body = (await request.json()) as {
     date?: string;
     assignments?: IncomingAssignment[];

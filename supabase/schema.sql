@@ -18,16 +18,16 @@ to anon, authenticated
 using (true);
 
 drop policy if exists "Public write schedules" on public.schedules;
-create policy "Public write schedules"
+create policy "Authenticated write schedules"
 on public.schedules
 for insert
-to anon, authenticated
+to authenticated
 with check (true);
 
 drop policy if exists "Public update schedules" on public.schedules;
-create policy "Public update schedules"
+create policy "Authenticated update schedules"
 on public.schedules
 for update
-to anon, authenticated
+to authenticated
 using (true)
 with check (true);
