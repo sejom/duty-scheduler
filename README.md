@@ -15,7 +15,10 @@ The stack is completely free to start:
 2. In Supabase, open the SQL editor.
 3. Run the SQL from `supabase/schema.sql`.
 
-This creates the `schedules` table and policies needed by this starter.
+This creates tenant-aware tables and policies:
+- `organizations` (hospitals)
+- `organization_members` (who belongs to which hospital)
+- `schedules` scoped by `organization_id`
 
 ## 2) Configure environment variables
 
@@ -34,6 +37,25 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
+## 3.1) Add yourself to a hospital tenant
+
+After creating an auth user in Supabase, insert at least one organization membership.
+
+Example SQL (replace placeholders):
+
+```sql
+insert into public.organizations (name)
+values ('Hospital A')
+on conflict (name) do nothing;
+
+insert into public.organization_members (organization_id, user_id, role)
+select o.id, u.id, 'admin'
+from public.organizations o
+join auth.users u on u.email = 'your-email@example.com'
+where o.name = 'Hospital A'
+on conflict (organization_id, user_id) do nothing;
+```
+
 ## 4) Deploy to Vercel
 
 1. Push this project to GitHub.
@@ -45,10 +67,11 @@ Open [http://localhost:3000](http://localhost:3000).
 
 ## How this starter works
 
-- `app/page.tsx`: Manual scheduler UI for one day with 3 shifts.
-- `app/api/schedules/route.ts`: Reads and saves shift assignments.
+- `app/page.tsx`: Daily/monthly/employee views and hospital selector.
+- `app/api/schedules/route.ts`: Reads and saves tenant-scoped shift assignments.
+- `app/api/organizations/route.ts`: Lists hospitals for the signed-in user.
 - `lib/supabase.ts`: Shared Supabase client.
-- `supabase/schema.sql`: Database schema + RLS policies.
+- `supabase/schema.sql`: Multi-tenant schema + RLS policies.
 
 ## Notes for next upgrades
 

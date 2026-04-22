@@ -28,16 +28,59 @@ function buildSupabaseForRequest(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const supabase = buildSupabaseForRequest(request);
   const date = request.nextUrl.searchParams.get("date");
+  const month = request.nextUrl.searchParams.get("month");
+  const organizationId = request.nextUrl.searchParams.get("organizationId");
 
-  if (!date) {
-    return NextResponse.json({ error: "Missing date query param" }, { status: 400 });
+  if (!organizationId) {
+    return NextResponse.json({ error: "Missing organizationId query param" }, { status: 400 });
+  }
+
+  if (!date && !month) {
+    return NextResponse.json(
+      { error: "Missing date or month query param" },
+      { status: 400 },
+    );
+  }
+
+  if (month) {
+    const [yearText, monthText] = month.split("-");
+    const year = Number(yearText);
+    const monthNumber = Number(monthText);
+    if (!year || !monthNumber || monthNumber < 1 || monthNumber > 12) {
+      return NextResponse.json({ error: "Invalid month format" }, { status: 400 });
+    }
+
+    const startDate = `${yearText}-${monthText}-01`;
+    const lastDay = new Date(year, monthNumber, 0).getDate();
+    const endDate = `${yearText}-${monthText}-${String(lastDay).padStart(2, "0")}`;
+
+    const { data, error } = await supabase
+      .from("schedules")
+      .select("*")
+      .eq("organization_id", organizationId)
+      .gte("shift_date", startDate)
+      .lte("shift_date", endDate)
+      .order("shift_date", { ascending: true })
+      .order("shift_name", { ascending: true });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ data });
   }
 
   const { data, error } = await supabase
     .from("schedules")
     .select("*")
+    .eq("organization_id", organizationId)
     .eq("shift_date", date)
     .order("shift_name", { ascending: true });
 
@@ -57,11 +100,12 @@ export async function POST(request: NextRequest) {
   const supabase = buildSupabaseForRequest(request);
   const body = (await request.json()) as {
     date?: string;
+    organizationId?: string;
     assignments?: IncomingAssignment[];
     notes?: string;
   };
 
-  if (!body.date || !Array.isArray(body.assignments)) {
+  if (!body.date || !body.organizationId || !Array.isArray(body.assignments)) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
 
@@ -73,6 +117,7 @@ export async function POST(request: NextRequest) {
   }
 
   const upsertRows = body.assignments.map((assignment) => ({
+    organization_id: body.organizationId,
     shift_date: body.date,
     shift_name: assignment.shift_name,
     assigned_to: assignment.assigned_to.trim(),
@@ -81,7 +126,7 @@ export async function POST(request: NextRequest) {
 
   const { error } = await supabase
     .from("schedules")
-    .upsert(upsertRows, { onConflict: "shift_date,shift_name" });
+    .upsert(upsertRows, { onConflict: "organization_id,shift_date,shift_name" });
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
